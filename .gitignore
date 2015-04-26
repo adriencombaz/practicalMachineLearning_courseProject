@@ -1,0 +1,7 @@
+*.csv
+*.txt
+*.R
+.Rhistory
+report_cache/
+report_files/
+myworkspace

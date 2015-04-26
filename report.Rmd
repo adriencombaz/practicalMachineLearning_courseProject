@@ -1,0 +1,139 @@
+---
+title: "Practical Machine Learning Course Project:"
+subtitle: "Weight Lifting Exercise Classification"
+output: 
+  html_document:
+    keep_md: true
+    fig_caption: true
+---
+
+## Synopsis
+Using devices such as _Jawbone Up_, _Nike FuelBand_, and _Fitbit_ it is now possible to collect a large amount of data about personal activity relatively inexpensively. 
+These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. 
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. 
+They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv). 
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+The goal of this project is to predict the manner in which the participants did the exercise.
+In this report we present step-by-step the methods used and the results obtained.
+We first detail the acquisition and basic processing of the data, then we estimate the out-of-sample performance for 2 different machine learning algorithms, namely Regression Tree and Random Forest.
+As we observe that Random Forest seems to lead to better performance, we build our final model using this method.
+We finally compute and submit the predicted classes for the test data.
+
+## Loading and Processing the data
+
+We first load all the libraries used for our code to run, and set the seed of R's random number generator for reproducibility purposes:
+```{r, message=F}
+library(caret)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+set.seed(35739)
+```
+
+We then load the data into R:
+```{r, cache=F}
+dataTrain <- read.csv("pml-training.csv", header=T, na.strings = c("NA", "#DIV/0!" ,""))
+dataTest  <- read.csv("pml-testing.csv", header=T, na.strings = c("NA", "#DIV/0!" ,""))
+```
+
+The 2 datasets consit of respectively `r nrow(dataTrain)` and `r nrow(dataTest)` observations of `r ncol(dataTrain)` variables:
+```{r}
+colnames(dataTrain)
+```
+
+We first discard the variables that are of no interest for our classification problem (_eg._ observation number, user name, time stamps ...):
+```{r, cache=F}
+dataTrain <- dataTrain[,-c(1:7)]
+dataTest  <- dataTest[,-c(1:7)]
+```
+
+We then discard the variables for which there is 50% or more missing values in the training set:
+```{r, cache=F}
+pcNA      <- apply(dataTrain, 2, function(x) sum(is.na(x))/length(x) )
+dataTrain <- dataTrain[, pcNA<0.5]
+dataTest  <- dataTest[, pcNA<0.5]
+```
+
+We are left with `r ncol(dataTrain)` variables.
+We then remove near zeo variance variables (from the training set):
+```{r, cache=F}
+nzv       <- nearZeroVar(dataTrain, saveMetrics=TRUE)
+dataTrain <- dataTrain[,!nzv$nzv]
+dataTest  <- dataTest[,!nzv$nzv]
+```
+We are still left with `r ncol(dataTrain)` variables (which means that no additional variable was removed, it is still good practice to anyway be checking for it).
+
+One last adjustment is to discard the last column of the test dataset which is the problem ID (in the training dataset this last column corresponds to the class of the observation):
+```{r, cache=F}
+dataTest  <- dataTest[,-ncol(dataTest)]
+```
+
+## Machine Learning Algorithm Selection
+
+We aim here at selecting the best machine learning algorithm for our classification problem.
+We want to use the method that will lead to the smallest out-ot-sample error.
+To this effect split the original training set into a 70% training set and 30% testing set.
+The new training set is used to train various machine learning algorithms, and the test set is used to measure the classification performance and in this way to estimate the out-of-sample error.
+We consider 2 machine learning algorithms: a regression tree and a random forest classifier.
+For both we perform the training procedure via a 5-fold cross-validation:
+```{r}
+inTrain     <- createDataPartition(y=dataTrain$classe, p=0.7, list=FALSE)
+myTraining  <- dataTrain[inTrain, ]
+myTesting   <- dataTrain[-inTrain, ]
+trCtrl      <- trainControl(method = "cv", number=5)
+```
+
+### Regression tree
+We show here the results from the regression tree:
+```{r, cache=F}
+mTree <- train( classe ~ ., data=myTraining, method="rpart", trControl = trCtrl)
+fancyRpartPlot(mTree$finalModel)
+predictionsTree <- predict(mTree, newdata=myTesting)
+confusionMatrix(predictionsTree, myTesting$classe)
+```
+
+This first classification attempt shows quite poor results; the accuracy barely reaches 50% accuracy, all observations from class D are misclassified and only data from class A have a sensitivity higher than 50%.
+We can therefore only hope that our next attempt to build a classifier will show better performance o the test.
+
+### Random forest
+We show here the results from the random forest:
+```{r, cache=F}
+mRF <- train( classe ~ ., data=myTraining, method="rf", trControl = trCtrl)
+predictionsRF <- predict(mRF, newdata=myTesting)
+confusionMatrix(predictionsRF, myTesting$classe)
+```
+
+The random forest showq very good results: an accuracy of about 99% and sentitivities and specificities of at least 99% for each of our 5 classes.
+
+
+## Building the final model and submitting the results
+
+As the random forest method led to lower values for the out-of-sample error estimate, we select this classification method.
+We thus build a random forest classifier on the full training dataset this time, and apply it to our original test set.
+We show the predictions of the model on the test set:
+```{r, cache=F}
+mRF_final <- train( classe ~ ., data=dataTrain, method="rf", trControl = trCtrl)
+predictionsRF <- predict(mRF, newdata=dataTest)
+predictionsRF
+```
+
+The following code generate files for the assignment submission:
+```{r, eval=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
+
